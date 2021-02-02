@@ -50,6 +50,7 @@
 #ifdef USE_TTS
 #include "common/text-to-speech.h"
 #endif
+#include "shadowbox/shadowbox.h"
 
 // SDL surface flags which got removed in SDL2.
 #if SDL_VERSION_ATLEAST(2, 0, 0)
@@ -910,6 +911,7 @@ bool SurfaceSdlGraphicsManager::loadGFXMode() {
 	const Uint32 aMask = ((0xFF >> format.aLoss) << format.aShift);
 	_screen = SDL_CreateRGBSurface(SDL_SWSURFACE, _videoMode.screenWidth, _videoMode.screenHeight,
 						_screenFormat.bytesPerPixel * 8, rMask, gMask, bMask, aMask);
+printf("]] at %s:%d _screen is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, _videoMode.screenWidth, _videoMode.screenHeight, _screenFormat.bytesPerPixel);
 	if (_screen == NULL)
 		error("allocating _screen failed");
 
@@ -986,6 +988,7 @@ bool SurfaceSdlGraphicsManager::loadGFXMode() {
 						_hwScreen->format->Gmask,
 						_hwScreen->format->Bmask,
 						_hwScreen->format->Amask);
+printf("]] at %s:%d _tmpscreen is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, _videoMode.screenWidth+3, _videoMode.screenHeight+3, 2);
 
 	if (_tmpscreen == NULL)
 		error("allocating _tmpscreen failed");
@@ -996,6 +999,7 @@ bool SurfaceSdlGraphicsManager::loadGFXMode() {
 						_hwScreen->format->Gmask,
 						_hwScreen->format->Bmask,
 						_hwScreen->format->Amask);
+printf("]] at %s:%d _overlayscreen is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, _videoMode.overlayWidth, _videoMode.overlayHeight, 2);
 
 	if (_overlayscreen == NULL)
 		error("allocating _overlayscreen failed");
@@ -1008,6 +1012,7 @@ bool SurfaceSdlGraphicsManager::loadGFXMode() {
 						_hwScreen->format->Gmask,
 						_hwScreen->format->Bmask,
 						_hwScreen->format->Amask);
+printf("]] at %s:%d _tmpscreen2 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, _videoMode.overlayWidth + 3, _videoMode.overlayHeight + 3, 2);
 
 	if (_tmpscreen2 == NULL)
 		error("allocating _tmpscreen2 failed");
@@ -1017,6 +1022,9 @@ bool SurfaceSdlGraphicsManager::loadGFXMode() {
 		InitScalers(555);
 	else
 		InitScalers(565);
+
+	if (_shadowbox)
+		_shadowbox->setup_sdl(this, _screen, _tmpscreen, _hwScreen, _currentPalette);
 
 	return true;
 }
@@ -1141,7 +1149,6 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
 	int height, width;
 	ScalerProc *scalerProc;
 	int scale1;
-
 	// If there's an active debugger, update it
 	GUI::Debugger *debugger = g_engine ? g_engine->getDebugger() : nullptr;
 	if (debugger)
@@ -1204,7 +1211,6 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
 		width = _videoMode.overlayWidth;
 		height = _videoMode.overlayHeight;
 		scalerProc = Normal1x;
-
 		scale1 = 1;
 	}
 
@@ -1230,6 +1236,38 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
 
 	// Only draw anything if necessary
 	if (_numDirtyRects > 0 || _cursorNeedsRedraw) {
+////printf("]]-]] UpdateScreen():\n");
+/* ej notes:
+when the "press F9" overlay is active,I get:
+  ]] clearOverlay():
+    ]]-1788] clearOverlay blit 320x200 _screen 320x200 8bpp _tmpscreen 323x203 16bpp _overlayscreen 640x400 16bpp
+...twice, and then every frame I get...
+  ]]-]] UpdateScreen():
+  ]]-1248] updateScreen 640x400 sc1 orig:_overlayscreen 640x400 16bpp src:_tmpscreen2 643x403 16bpp
+    ]]-1272] updateScreenB 640x190 sc1 from: 643x403 16bpp to:_hwScreen 640x400 16bpp
+...otherwise I get:
+  ]]-]] UpdateScreen():
+  ]]-1241] updateScreen 320x200 sc2 orig:_screen 320x200 8bpp src:_tmpscreen 323x203 16bpp
+    ]]-1272] updateScreenB 320x200 sc2 from: 323x203 16bpp to:_hwScreen 640x400 16bpp
+]
+*/
+
+// if (!_overlayVisible)
+// {
+// printf("]]-%d] updateScreen %dx%d sc%d orig:_screen %dx%d %dbpp src:_tmpscreen %dx%d %dbpp \n",
+// 			__LINE__, width, height, scale1,
+// 			origSurf->w, origSurf->h, origSurf->format->BitsPerPixel,
+// 			srcSurf->w, srcSurf->h, srcSurf->format->BitsPerPixel);
+// }
+// else
+// {
+// printf("]]-%d] updateScreen %dx%d sc%d orig:_overlayscreen %dx%d %dbpp src:_tmpscreen2 %dx%d %dbpp \n",
+// 			__LINE__, width, height, scale1,
+// 			origSurf->w, origSurf->h, origSurf->format->BitsPerPixel,
+// 			srcSurf->w, srcSurf->h, srcSurf->format->BitsPerPixel);
+// }
+
+
 		SDL_Rect *r;
 		SDL_Rect dst;
 		uint32 srcPitch, dstPitch;
@@ -1246,6 +1284,11 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
 
 		SDL_LockSurface(srcSurf);
 		SDL_LockSurface(_hwScreen);
+
+//printf("  ]]-%d] updateScreenB %dx%d sc%d from: %dx%d %dbpp to:_hwScreen %dx%d %dbpp \n",
+			// __LINE__, width, height, scale1,
+			// srcSurf->w, srcSurf->h, srcSurf->format->BitsPerPixel,
+			// _hwScreen->w, _hwScreen->h, _hwScreen->format->BitsPerPixel);
 
 		srcPitch = srcSurf->pitch;
 		dstPitch = _hwScreen->pitch;
@@ -1472,6 +1515,8 @@ void SurfaceSdlGraphicsManager::setFilteringMode(bool enable) {
 void SurfaceSdlGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h) {
 	assert(_transactionMode == kTransactionNone);
 	assert(buf);
+
+//	printf("]]]]]] ejejej hello\n");
 
 	if (_screen == NULL) {
 		warning("SurfaceSdlGraphicsManager::copyRectToScreen: _screen == NULL");
@@ -1744,6 +1789,12 @@ void SurfaceSdlGraphicsManager::clearOverlay() {
 	src.h = dst.h = _videoMode.screenHeight;
 	if (SDL_BlitSurface(_screen, &src, _tmpscreen, &dst) != 0)
 		error("SDL_BlitSurface failed: %s", SDL_GetError());
+printf("]] clearOverlay():\n");
+printf("  ]]-%d] clearOverlay blit %dx%d _screen %dx%d %dbpp _tmpscreen %dx%d %dbpp _overlayscreen %dx%d %dbpp \n",
+			__LINE__, _videoMode.screenWidth, _videoMode.screenHeight,
+			_screen->w, _screen->h, _screen->format->BitsPerPixel,
+			_tmpscreen->w, _tmpscreen->h, _tmpscreen->format->BitsPerPixel,
+			_overlayscreen->w, _overlayscreen->h, _overlayscreen->format->BitsPerPixel);
 
 	SDL_LockSurface(_tmpscreen);
 	SDL_LockSurface(_overlayscreen);
@@ -2659,6 +2710,7 @@ SDL_Surface *SurfaceSdlGraphicsManager::SDL_SetVideoMode(int width, int height, 
 	}
 
 	SDL_Surface *screen = SDL_CreateRGBSurface(0, width, height, 16, 0xF800, 0x7E0, 0x1F, 0);
+printf("]] at %s:%d screen is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, width, height, 2);
 	if (!screen) {
 		deinitializeRenderer();
 		return nullptr;

@@ -23,6 +23,7 @@
 
 #include "scumm/base-costume.h"
 #include "scumm/costume.h"
+#include "shadowbox/shadowbox.h"
 
 namespace Scumm {
 
@@ -35,6 +36,9 @@ byte BaseCostumeRenderer::drawCostume(const VirtScreen &vs, int numStrips, const
 		_out.setPixels(vs.getBackPixels(0, 0));
 	else
 		_out.setPixels(vs.getPixels(0, 0));
+
+	if (_shadowbox)
+		_out = _shadowbox->get_actor_surface(_out, a);
 
 	_actorX += _vm->_virtscr[kMainVirtScreen].xstart & 7;
 	_out.w = _out.pitch / _vm->_bytesPerPixel;

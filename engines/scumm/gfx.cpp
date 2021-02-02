@@ -33,6 +33,8 @@
 #include "scumm/usage_bits.h"
 #include "scumm/he/wiz_he.h"
 #include "scumm/util.h"
+#include "shadowbox/shadowbox.h"
+#include "shadowbox/shadowbox.cpp"
 
 #ifdef USE_ARM_GFX_ASM
 

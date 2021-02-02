@@ -33,6 +33,7 @@
 #include "common/fs.h"
 #include "engines/engine.h"
 #include "gui/gui-manager.h"
+#include "shadowbox/shadowbox.h"
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 #define GAMECONTROLLERDB_FILE "gamecontrollerdb.txt"
@@ -471,9 +472,11 @@ bool SdlEventSource::dispatchSDLEvent(SDL_Event &ev, Common::Event &event) {
 		}
 		if (yDir < 0) {
 			event.type = Common::EVENT_WHEELDOWN;
+			_shadowbox->adjust_view_angle(-0.1);
 			return true;
 		} else if (yDir > 0) {
 			event.type = Common::EVENT_WHEELUP;
+			_shadowbox->adjust_view_angle(0.1);
 			return true;
 		} else {
 			return false;
