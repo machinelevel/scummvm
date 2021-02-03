@@ -37,6 +37,7 @@
 #include "scumm/he/sprite_he.h"
 #include "scumm/usage_bits.h"
 #include "scumm/util.h"
+#include "shadowbox/shadowbox.h"
 
 namespace Scumm {
 
@@ -2245,6 +2246,14 @@ void Actor::drawActorCostume(bool hitTestMode) {
 		// Record the vertical extent of the drawn actor
 		_top = bcr->_draw_top;
 		_bottom = bcr->_draw_bottom;
+		if (shadowbox && _number == 1)
+		{
+			if (_bottom > 0)
+			{
+		printf("]]] top:%d bot: %d\n", (int)_top, (int)_bottom);
+				shadowbox->actor_draw_done(this, bcr->_actorX, _top, _bottom);
+			}
+		}
 	}
 }
 

@@ -59,6 +59,39 @@ public:
             delete actor_foils[i];
     }
 
+    void actor_draw_done(const Actor* actor, int actorX, int actorY1, int actorY2)
+    {
+        printf("Actor %d draw done: x:%d w:%d y1:%d y2:%d\n", 
+            (int)actor->_number, actorX, (int)actor->_width, (int)actorY1, (int)actorY2);
+        Foil* foil = actor_foils[actor->_number];
+        int x1a = actorX - (actor->_width >> 1);
+        int x1 = x1a;
+        int x2 = x1 + actor->_width;
+        int y1 = actorY1;
+        int y2 = actorY2;
+        if (x1 < 0)
+            x1 = 0;
+        if (x2 > 320)
+            x2 = 320;
+        int h = y2 - y1;
+        int w = x2 - x1;
+        SDL_LockSurface(foil->sdl8);
+        uint8_t* src = (uint8_t*)foil->surface.getPixels();
+        uint8_t* dst = (uint8_t*)foil->sdl8->pixels;
+        for (int row = 0; row < h; ++row)
+        {
+            uint8_t* srow = src + (row + y1) * foil->surface.pitch + x1;
+            uint8_t* drow = dst + row * foil->sdl8->pitch + (x1 - x1a);
+            for (int col = 0; col < w; ++col)
+            {
+                drow[col] = srow[col];
+                srow[col] = 0;
+            }
+        }
+        SDL_UnlockSurface(foil->sdl8);
+//            (int)actor->_number, actorX, (int)actor->_width, (int)actor->_top, (int)actor->_bottom);
+    }
+
     Graphics::Surface& get_actor_surface(const Surface &vs_surface, const Actor *actor)
     {
         Foil* foil = actor_foils[actor->_number];
@@ -120,7 +153,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
 
     void compose()
     {
-        SDL_LockSurface(sdl_hwScreen);
+//        SDL_LockSurface(sdl_hwScreen);
         for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
         {
             Foil* foil = actor_foils[actor_num];
@@ -133,13 +166,13 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
                 sr.y = dr.y = 0;
                 sr.w = dr.w = foil->w;
                 sr.h = dr.h = foil->h;
-                SDL_LockSurface(foil->sdl8);
+//                SDL_LockSurface(foil->sdl8);
                 if (SDL_BlitSurface(foil->sdl8, &sr, sdl_hwScreen, &dr) != 0)
                     error("SDL_BlitSurface failed: %s", SDL_GetError());
-                SDL_UnlockSurface(foil->sdl8);
+//                SDL_UnlockSurface(foil->sdl8);
             }
         }
-        SDL_UnlockSurface(sdl_hwScreen);
+//        SDL_UnlockSurface(sdl_hwScreen);
     }
 
     // void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h)

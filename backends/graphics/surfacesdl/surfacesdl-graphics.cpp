@@ -1023,8 +1023,8 @@ printf("]] at %s:%d _tmpscreen2 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, 
 	else
 		InitScalers(565);
 
-	if (_shadowbox)
-		_shadowbox->setup_sdl(this, _screen, _tmpscreen, _hwScreen, _currentPalette);
+	if (shadowbox)
+		shadowbox->setup_sdl(this, _screen, _tmpscreen, _hwScreen, _currentPalette);
 
 	return true;
 }
@@ -1433,6 +1433,8 @@ when the "press F9" overlay is active,I get:
 		// Finally, blit all our changes to the screen
 		if (!_displayDisabled) {
 			SDL_UpdateRects(_hwScreen, _numDirtyRects, _dirtyRectList);
+			if (shadowbox)
+				shadowbox->compose();
 		}
 	}
 
