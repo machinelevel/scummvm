@@ -647,6 +647,13 @@ bool SdlEventSource::handleKeyDown(SDL_Event &ev, Common::Event &event) {
 	SDL_Keycode sdlKeycode = obtainKeycode(ev.key.keysym);
 	Common::KeyCode key = SDLToOSystemKeycode(sdlKeycode);
 
+	if (shadowbox)
+	{
+		if (key == Common::KEYCODE_s)
+			shadowbox->save_depth_image();
+		if (key == Common::KEYCODE_l)
+			shadowbox->load_depth_image();
+	}
 	// Handle scroll lock as a key modifier
 	if (key == Common::KEYCODE_SCROLLOCK)
 		_scrollLock = !_scrollLock;

@@ -27,7 +27,7 @@ class Foil
 {
 public:
     Foil()
-    :w(0), h(0), actor(NULL)
+    :w(0), h(0), actor(NULL), sdl8(NULL), sdl16(NULL)
     {
     }
     ~Foil()
@@ -36,9 +36,9 @@ public:
     uint w;
     int h;
     const Actor* actor;
-    Surface surface;
     SDL_Surface* sdl8;
     SDL_Surface* sdl16;
+    Surface surface;
 };
 
 class ShadowBox
@@ -47,6 +47,7 @@ public:
     ShadowBox()
     {
         _sdlmgr = NULL;
+        depth_image = NULL;
         view_angle_min = -1.0f;
         view_angle_max = 1.0f;
         view_angle = 0.0f;
@@ -106,16 +107,12 @@ public:
         {
             foil->w = w;
             foil->h = h;
-            // TODO: delete the old buffers
 printf("At %d: create foil for actor %d: %dx%d\n", __LINE__, (int)actor->_number, (int)w, (int)h);
             foil->surface.create(vs_surface.w, vs_surface.h, vs_surface.format);
 
-            // const Graphics::PixelFormat &format = sdl_screen->format;
-            // const Uint32 rMask = ((0xFF >> format.rLoss) << format.rShift);
-            // const Uint32 gMask = ((0xFF >> format.gLoss) << format.gShift);
-            // const Uint32 bMask = ((0xFF >> format.bLoss) << format.bShift);
-            // const Uint32 aMask = ((0xFF >> format.aLoss) << format.aShift);
-            // foil->sdl8 = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, format.bytesPerPixel * 8, rMask, gMask, bMask, aMask);
+            if (foil->sdl8)
+                SDL_FreeSurface(foil->sdl8);
+
             foil->sdl8 = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, sdl_screen->format->BitsPerPixel,
                                                                     sdl_screen->format->Rmask,
                                                                     sdl_screen->format->Gmask,
@@ -128,6 +125,60 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         }
 //printf("At %d: return %dx%d foil for actor %d\n", __LINE__, foil->surface.w, foil->surface.h, (int)a->_number);
         return foil->surface;
+    }
+
+    void save_depth_image()
+    {
+        const char* image_file_name = "depth/room_depth_save.bmp";
+        printf("Saving BMP image: %s\n", image_file_name);
+        SDL_SaveBMP(sdl_tmpscreen, image_file_name);
+    }
+
+    void convert_to_heightmap(SDL_Surface* img)
+    {
+        // Convert a palette grayscale image to a no-palette-needed heightmap
+        SDL_LockSurface(img);
+        uint32_t num_pixels = img->h * img->pitch;
+        uint8_t* pix = (uint8_t*)img->pixels;
+        SDL_Palette* pal = img->format->palette;
+        for (uint32_t i = 0; i < num_pixels; ++i)
+            pix[i] = pal->colors[pix[i]].r;
+
+        for (uint32_t i = 0; i < 256; ++i)
+        {
+            pal->colors[i].r = pal->colors[i].g = pal->colors[i].b = i;
+            pal->colors[i].a = 255;
+        }
+        SDL_UnlockSurface(img);
+    }
+
+    void load_depth_image()
+    {
+        const char* image_file_name = "depth/room_depth_test1.bmp";
+        printf("Loading BMP image: %s\n", image_file_name);
+        if (depth_image)
+            SDL_FreeSurface(depth_image);
+        depth_image = SDL_LoadBMP(image_file_name);
+        if (depth_image)
+        {
+            // printf("  depth bpp = %d\n", (int)depth_image->format->BitsPerPixel);
+            // printf("  depth palette entries = %d\n", (int)depth_image->format->palette->ncolors);
+            // for (int i = 0; i < 256; ++i)
+            // {
+            //     printf("  depth palette[%d] = %d,%d,%d,%d\n", i, (int)depth_image->format->palette->colors[i].r,
+            //                                                      (int)depth_image->format->palette->colors[i].g,
+            //                                                      (int)depth_image->format->palette->colors[i].b,
+            //                                                      (int)depth_image->format->palette->colors[i].a);
+            // }
+            convert_to_heightmap(depth_image);
+            // for (int i = 0; i < 256; ++i)
+            // {
+            //     printf("  depth palette[%d] = %d,%d,%d,%d\n", i, (int)depth_image->format->palette->colors[i].r,
+            //                                                      (int)depth_image->format->palette->colors[i].g,
+            //                                                      (int)depth_image->format->palette->colors[i].b,
+            //                                                      (int)depth_image->format->palette->colors[i].a);
+            // }
+        }
     }
 
     float adjust_view_angle(float amount)
@@ -173,6 +224,20 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
             }
         }
 //        SDL_UnlockSurface(sdl_hwScreen);
+        if (1)
+        {
+            if (!depth_image)
+                load_depth_image();
+            SDL_Rect sr;
+            SDL_Rect dr;
+            sr.x = 0;
+            dr.x = 128;
+            sr.y = dr.y = 0;
+            sr.w = dr.w = 320;
+            sr.h = dr.h = 200;
+            if (SDL_BlitSurface(depth_image, &sr, sdl_hwScreen, &dr) != 0)
+                error("SDL_BlitSurface failed: %s", SDL_GetError());
+        }
     }
 
     // void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h)
@@ -189,6 +254,7 @@ protected:
     SDL_Surface* sdl_screen;
     SDL_Surface* sdl_tmpscreen;
     SDL_Surface* sdl_hwScreen;
+    SDL_Surface* depth_image;
     SDL_Color*   sdl_currentPalette;
 };
 
