@@ -48,8 +48,8 @@ public:
     {
         _sdlmgr = NULL;
         depth_image = NULL;
-        view_angle_min = -1.0f;
-        view_angle_max = 1.0f;
+        view_angle_min = -5.0f;
+        view_angle_max = 5.0f;
         view_angle = 0.0f;
         for (uint32_t i = 0; i < SBOX_MAX_NUM_ACTORS; ++i)
             actor_foils[i] = NULL;
@@ -134,6 +134,19 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         SDL_SaveBMP(sdl_tmpscreen, image_file_name);
     }
 
+    void make_grayscale_clut(SDL_Surface* img)
+    {
+        // build the grayscale palette
+        SDL_LockSurface(img);
+        SDL_Palette* pal = img->format->palette;
+        for (uint32_t i = 0; i < 256; ++i)
+        {
+            pal->colors[i].r = pal->colors[i].g = pal->colors[i].b = i;
+            pal->colors[i].a = 255;
+        }
+        SDL_UnlockSurface(img);
+    }
+
     void convert_to_heightmap(SDL_Surface* img)
     {
         // Convert a palette grayscale image to a no-palette-needed heightmap
@@ -143,13 +156,8 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         SDL_Palette* pal = img->format->palette;
         for (uint32_t i = 0; i < num_pixels; ++i)
             pix[i] = pal->colors[pix[i]].r;
-
-        for (uint32_t i = 0; i < 256; ++i)
-        {
-            pal->colors[i].r = pal->colors[i].g = pal->colors[i].b = i;
-            pal->colors[i].a = 255;
-        }
         SDL_UnlockSurface(img);
+        make_grayscale_clut(img);
     }
 
     void load_depth_image()
@@ -188,7 +196,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
             view_angle = view_angle_max;
         if (view_angle < view_angle_min)
             view_angle = view_angle_min;
-        printf("-> shadowbox view %.2f\n", view_angle);
+//        printf("-> shadowbox view %.2f\n", view_angle);
         return view_angle;
     }
 
@@ -200,34 +208,148 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         sdl_tmpscreen = _tmpscreen;
         sdl_hwScreen = _hwScreen;
         sdl_currentPalette = _currentPalette;
+
+        // set up the heightmap
+        zbuf = SDL_CreateRGBSurface(SDL_SWSURFACE, 640, 200, 8,
+                                        sdl_screen->format->Rmask,
+                                        sdl_screen->format->Gmask,
+                                        sdl_screen->format->Bmask,
+                                        sdl_screen->format->Amask);
+        make_grayscale_clut(zbuf);
+    }
+
+    void clear_zbuf()
+    {
+        SDL_LockSurface(zbuf);
+        uint32_t num_uint64 = zbuf->h * (zbuf->pitch >> 3);
+        uint64_t* pix = (uint64_t*) zbuf->pixels;
+        for (uint32_t i = 0; i < num_uint64; ++i)
+            pix[i] = 0;
+        SDL_UnlockSurface(zbuf);
+    }
+
+    void make_parallax_table()
+    {
+        float near_parallax = view_angle * 10.0;
+        float far_parallax = view_angle * -10.0;
+        for (uint32_t i = 0; i < 256; ++i)
+        {
+            float t = (float)i / 255.0;
+            float parallax = near_parallax + t * (far_parallax - near_parallax);
+            parallax_table[i] = uint32_t(parallax);
+        }
+    }
+
+    void compose_backdrop()
+    {
+        if (!(sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
+            return;
+        make_parallax_table();
+        clear_zbuf();
+        // depth_image is 320x200 8bit
+        // zbuf is 640x200 8bit
+        // sdl_tmpscreen is 323x203 16bit
+        // sdl_hwScreen is 640x480 16bit
+        SDL_LockSurface(depth_image);
+        SDL_LockSurface(zbuf);
+        SDL_LockSurface(sdl_tmpscreen);
+        SDL_LockSurface(sdl_hwScreen);
+        uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
+        uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
+        uint16_t* cdst2 = cdst + (sdl_hwScreen->pitch >> 1);
+        uint8_t* zsrc = (uint8_t*)depth_image->pixels;
+        uint8_t* zdst = (uint8_t*)zbuf->pixels;
+        int32_t w = 320;
+        int32_t h = 200;
+        int32_t ww = w << 1;
+        for (int32_t row = 0; row < h; ++row)
+        {
+            uint16_t cprev = csrc[0];
+            uint8_t zprev = zsrc[0];
+            int32_t plxprev = parallax_table[zprev];
+            int32_t xdst = plxprev;
+            for (int32_t x = 0; x < xdst; ++x)
+            {
+                cdst[x] = cdst2[x] = cprev;
+                zdst[x] = zprev;
+            }
+            for (int32_t col = 0; col < w; ++col)
+            {
+                uint16_t c = csrc[col];
+                uint8_t z = zsrc[col];
+                int32_t plx = plxprev;
+                if (z != zprev)
+                    plx = parallax_table[z];
+                xdst += plx - plxprev;
+                if (xdst >= 0 && xdst < ww)
+                {
+                    if (z >= zdst[xdst])
+                    {
+                        cdst[xdst] = cdst2[xdst] = c;
+                        zdst[xdst] = z;
+                    }
+                }
+                xdst++;
+                if (xdst >= 0 && xdst < ww)
+                {
+                    if (z >= zdst[xdst])
+                    {
+                        cdst[xdst] = cdst2[xdst] = c;
+                        zdst[xdst] = z;
+                    }
+                }
+                xdst++;
+                cprev = c;
+                zprev = z;
+                plxprev = plx;
+            }
+            for (int32_t x = xdst; x < ww; ++x)
+            {
+                cdst[x] = cdst2[x] = cprev;
+                zdst[x] = zprev;
+            }
+            csrc += sdl_tmpscreen->pitch >> 1;
+            cdst += sdl_hwScreen->pitch;
+            cdst2 += sdl_hwScreen->pitch;
+            zsrc += depth_image->pitch;
+            zdst += zbuf->pitch;
+        }
+        SDL_UnlockSurface(depth_image);
+        SDL_UnlockSurface(zbuf);
+        SDL_UnlockSurface(sdl_tmpscreen);
+        SDL_UnlockSurface(sdl_hwScreen);
     }
 
     void compose()
     {
+        if (!depth_image)
+            load_depth_image();
+        compose_backdrop();
 //        SDL_LockSurface(sdl_hwScreen);
-        for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
+        if (0)
         {
-            Foil* foil = actor_foils[actor_num];
-            if (foil)
+            for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
             {
-                SDL_Rect sr;
-                SDL_Rect dr;
-                sr.x = 0;
-                dr.x = 32;
-                sr.y = dr.y = 0;
-                sr.w = dr.w = foil->w;
-                sr.h = dr.h = foil->h;
-//                SDL_LockSurface(foil->sdl8);
-                if (SDL_BlitSurface(foil->sdl8, &sr, sdl_hwScreen, &dr) != 0)
-                    error("SDL_BlitSurface failed: %s", SDL_GetError());
-//                SDL_UnlockSurface(foil->sdl8);
+                Foil* foil = actor_foils[actor_num];
+                if (foil)
+                {
+                    SDL_Rect sr;
+                    SDL_Rect dr;
+                    sr.x = 0;
+                    dr.x = 32;
+                    sr.y = dr.y = 0;
+                    sr.w = dr.w = foil->w;
+                    sr.h = dr.h = foil->h;
+    //                SDL_LockSurface(foil->sdl8);
+                    if (SDL_BlitSurface(foil->sdl8, &sr, sdl_hwScreen, &dr) != 0)
+                        error("SDL_BlitSurface failed: %s", SDL_GetError());
+    //                SDL_UnlockSurface(foil->sdl8);
+                }
             }
         }
 //        SDL_UnlockSurface(sdl_hwScreen);
-        if (1)
+        if (0)
         {
-            if (!depth_image)
-                load_depth_image();
             SDL_Rect sr;
             SDL_Rect dr;
             sr.x = 0;
@@ -255,7 +377,9 @@ protected:
     SDL_Surface* sdl_tmpscreen;
     SDL_Surface* sdl_hwScreen;
     SDL_Surface* depth_image;
+    SDL_Surface* zbuf;
     SDL_Color*   sdl_currentPalette;
+    int32_t parallax_table[256];
 };
 
 } // namespace ShadowBox

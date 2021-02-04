@@ -1340,6 +1340,9 @@ when the "press F9" overlay is active,I get:
 
 		// Readjust the dirty rect list in case we are doing a full update.
 		// This is necessary if shaking is active.
+		if (shadowbox)
+			_forceRedraw = true;
+
 		if (_forceRedraw) {
 			_dirtyRectList[0].x = 0;
 			_dirtyRectList[0].y = 0;
@@ -1432,9 +1435,9 @@ when the "press F9" overlay is active,I get:
 
 		// Finally, blit all our changes to the screen
 		if (!_displayDisabled) {
-			SDL_UpdateRects(_hwScreen, _numDirtyRects, _dirtyRectList);
 			if (shadowbox)
 				shadowbox->compose();
+			SDL_UpdateRects(_hwScreen, _numDirtyRects, _dirtyRectList);
 		}
 	}
 
