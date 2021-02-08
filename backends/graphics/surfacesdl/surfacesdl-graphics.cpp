@@ -952,6 +952,12 @@ printf("]] at %s:%d _screen is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, _vid
 		}
 #endif
 
+if(shadowbox)
+{
+	_videoMode.hardwareWidth = shadowbox->get_mode_hw_width(_videoMode.hardwareWidth);
+	_videoMode.hardwareHeight = shadowbox->get_mode_hw_height(_videoMode.hardwareHeight);
+}
+
 		_hwScreen = SDL_SetVideoMode(_videoMode.hardwareWidth, _videoMode.hardwareHeight, 16,
 			_videoMode.fullscreen ? (SDL_FULLSCREEN|SDL_SWSURFACE) : SDL_SWSURFACE
 			);

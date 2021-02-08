@@ -2251,7 +2251,7 @@ void Actor::drawActorCostume(bool hitTestMode) {
 			if (_bottom > 0)
 			{
 		printf("]]] top:%d bot: %d\n", (int)_top, (int)_bottom);
-				shadowbox->actor_draw_done(this, bcr->_actorX, _top, _bottom);
+				shadowbox->actor_draw_done(this, bcr->_actorX, _top, _bottom, &_vm->_virtscr[kMainVirtScreen]);
 			}
 		}
 	}

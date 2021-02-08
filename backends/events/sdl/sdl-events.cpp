@@ -653,6 +653,8 @@ bool SdlEventSource::handleKeyDown(SDL_Event &ev, Common::Event &event) {
 			shadowbox->save_depth_image();
 		if (key == Common::KEYCODE_l)
 			shadowbox->load_depth_image();
+		if (key == Common::KEYCODE_BACKSLASH)
+			shadowbox->next_mode();
 	}
 	// Handle scroll lock as a key modifier
 	if (key == Common::KEYCODE_SCROLLOCK)

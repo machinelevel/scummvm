@@ -23,6 +23,12 @@ namespace ShadowBoxNs {
 
 #define SBOX_MAX_NUM_ACTORS 256
 
+enum {
+    SHADOWBOX_MODE_OFF,
+    SHADOWBOX_MODE_VIEWMASTER,
+    SHADOWBOX_MODE_HOWMANY // just to count and terminate
+};
+
 class Foil
 {
 public:
@@ -46,6 +52,7 @@ class ShadowBox
 public:
     ShadowBox()
     {
+        mode = SHADOWBOX_MODE_OFF;
         _sdlmgr = NULL;
         depth_image = NULL;
         view_angle_min = -5.0f;
@@ -60,10 +67,13 @@ public:
             delete actor_foils[i];
     }
 
-    void actor_draw_done(const Actor* actor, int actorX, int actorY1, int actorY2)
+    void actor_draw_done(const Actor* actor, int actorX, int actorY1, int actorY2,
+                        VirtScreen* mainVS)
     {
         printf("Actor %d draw done: x:%d w:%d y1:%d y2:%d\n", 
             (int)actor->_number, actorX, (int)actor->_width, (int)actorY1, (int)actorY2);
+        main_virt_screen = mainVS;
+
         Foil* foil = actor_foils[actor->_number];
         int x1a = actorX - (actor->_width >> 1);
         int x1 = x1a;
@@ -155,7 +165,10 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         uint8_t* pix = (uint8_t*)img->pixels;
         SDL_Palette* pal = img->format->palette;
         for (uint32_t i = 0; i < num_pixels; ++i)
-            pix[i] = pal->colors[pix[i]].r;
+        {
+            uint8_t h = pal->colors[pix[i]].r;
+            pix[i] = h ? h : 1; // min height of 1, so we know what's covered when rendering
+        }
         SDL_UnlockSurface(img);
         make_grayscale_clut(img);
     }
@@ -220,18 +233,18 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
 
     void clear_zbuf()
     {
-        SDL_LockSurface(zbuf);
+//        SDL_LockSurface(zbuf);
         uint32_t num_uint64 = zbuf->h * (zbuf->pitch >> 3);
         uint64_t* pix = (uint64_t*) zbuf->pixels;
         for (uint32_t i = 0; i < num_uint64; ++i)
             pix[i] = 0;
-        SDL_UnlockSurface(zbuf);
+//        SDL_UnlockSurface(zbuf);
     }
 
-    void make_parallax_table()
+    void make_parallax_table(float vangle)
     {
-        float near_parallax = view_angle * 10.0;
-        float far_parallax = view_angle * -10.0;
+        float near_parallax = vangle * 10.0;
+        float far_parallax = vangle * -10.0;
         for (uint32_t i = 0; i < 256; ++i)
         {
             float t = (float)i / 255.0;
@@ -240,12 +253,23 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         }
     }
 
+    void clear_to_black()
+    {
+        if (!(sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
+            return;
+        SDL_LockSurface(sdl_hwScreen);
+        uint32_t num_uint64 = sdl_hwScreen->h * (sdl_hwScreen->pitch >> 3);
+        uint64_t* pix = (uint64_t*) sdl_hwScreen->pixels;
+        for (uint32_t i = 0; i < num_uint64; ++i)
+            pix[i] = 0;
+        SDL_UnlockSurface(sdl_hwScreen);
+    }
+
     void compose_backdrop()
     {
         if (!(sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
             return;
-        make_parallax_table();
-        clear_zbuf();
+        make_parallax_table(view_angle);
         // depth_image is 320x200 8bit
         // zbuf is 640x200 8bit
         // sdl_tmpscreen is 323x203 16bit
@@ -254,6 +278,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         SDL_LockSurface(zbuf);
         SDL_LockSurface(sdl_tmpscreen);
         SDL_LockSurface(sdl_hwScreen);
+        clear_zbuf();
         uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
         uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
         uint16_t* cdst2 = cdst + (sdl_hwScreen->pitch >> 1);
@@ -320,11 +345,127 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         SDL_UnlockSurface(sdl_hwScreen);
     }
 
+    void compose_viewmaster_eye(int offset_x, int offset_y)
+    {
+        uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
+        uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
+        uint8_t* zsrc = (uint8_t*)depth_image->pixels;
+        uint8_t* zdst = (uint8_t*)zbuf->pixels;
+        int32_t w = 320;
+        int32_t h = 200;
+        cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
+
+        for (int32_t row = 0; row < h; ++row)
+        {
+            uint16_t cprev = csrc[0];
+            uint8_t zprev = zsrc[0];
+            int32_t plxprev = parallax_table[zprev];
+            int32_t xdst = plxprev;
+            for (int32_t x = 0; x < xdst; ++x)
+            {
+                cdst[x] = 0;
+                zdst[x] = 0;
+            }
+            for (int32_t col = 0; col < w; ++col)
+            {
+                uint16_t c = csrc[col];
+                uint8_t z = zsrc[col];
+                int32_t plx = plxprev;
+                if (z != zprev)
+                    plx = parallax_table[z];
+                int32_t new_xdst = col + plx;
+                if (xdst < new_xdst)
+                {
+                    // Fill in any empty space with the lower z value
+                    uint16_t cfill = c;
+                    uint8_t zfill = z;
+                    if (zprev < z)
+                    {
+                        cfill = cprev;
+                        zfill = zprev;
+                    }
+                    while (xdst < new_xdst)
+                    {
+                        if (xdst >= 0 && xdst < w)
+                        {
+                            if (zfill > zdst[xdst])
+                            {
+                                cdst[xdst] = cfill;
+                                zdst[xdst] = zfill;
+                            }
+                        }
+                        xdst++;
+                    }
+                }
+                xdst = new_xdst;
+                if (xdst >= 0 && xdst < w)
+                {
+                    if (z >= zdst[xdst])
+                    {
+                        cdst[xdst] = c;
+                        zdst[xdst] = z;
+                    }
+                }
+                cprev = c;
+                zprev = z;
+                plxprev = plx;
+            }
+            while (xdst < w)
+            {
+                if (xdst >= 0)
+                {
+                    if (!zdst[xdst])
+                        cdst[xdst] = 0;
+                }
+                xdst++;
+            }
+            csrc += sdl_tmpscreen->pitch >> 1;
+            cdst += sdl_hwScreen->pitch >> 1;
+            zsrc += depth_image->pitch;
+            zdst += zbuf->pitch;
+        }
+    }
+
+    void compose_viewmaster()
+    {
+        // depth_image is 320x200 8bit
+        // zbuf is 640x200 8bit
+        // sdl_tmpscreen is 323x203 16bit
+        // sdl_hwScreen is 640x480 16bit
+        if (!(sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
+            return;
+        SDL_LockSurface(depth_image);
+        SDL_LockSurface(zbuf);
+        SDL_LockSurface(sdl_tmpscreen);
+        SDL_LockSurface(sdl_hwScreen);
+
+        // left eye
+        make_parallax_table(view_angle);
+        clear_zbuf();
+        compose_viewmaster_eye(160+0, 200);
+        // right eye
+        make_parallax_table(-view_angle);
+        clear_zbuf();
+        compose_viewmaster_eye(320+320, 200);
+
+        SDL_UnlockSurface(depth_image);
+        SDL_UnlockSurface(zbuf);
+        SDL_UnlockSurface(sdl_tmpscreen);
+        SDL_UnlockSurface(sdl_hwScreen);
+    }
+
     void compose()
     {
         if (!depth_image)
             load_depth_image();
-        compose_backdrop();
+        if (mode == SHADOWBOX_MODE_VIEWMASTER)
+        {
+            compose_viewmaster();
+        }
+        else
+        {
+//            compose_backdrop();
+        }
 //        SDL_LockSurface(sdl_hwScreen);
         if (0)
         {
@@ -367,6 +508,46 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
     //     _system->copyRectToScreen(buf, pitch, x, y, w, h);
     // }
 
+    int get_mode() const
+    {
+        return mode;
+    }
+
+    int get_mode_hw_width(int proposed_width) const
+    {
+        return 2 * proposed_width;
+        if (mode == SHADOWBOX_MODE_VIEWMASTER)
+            return 2 * proposed_width;
+        else
+            return proposed_width;
+    }
+
+    int get_mode_hw_height(int proposed_height) const
+    {
+        return 2 * proposed_height;
+        return proposed_height;
+    }
+
+    void set_mode(int to_mode)
+    {
+        mode = to_mode;
+        clear_to_black();
+        if (mode == SHADOWBOX_MODE_OFF)
+        {
+//            _sdlmgr->shadowbox_set_hw_screen(640, 400);
+            _sdlmgr->notifyVideoExpose();
+        }
+        if (mode == SHADOWBOX_MODE_VIEWMASTER)
+        {
+//            _sdlmgr->shadowbox_set_hw_screen(1280, 400);
+        }
+    }
+
+    void next_mode()
+    {
+        set_mode((mode + 1) % SHADOWBOX_MODE_HOWMANY);
+    }
+
 protected:
     float view_angle_min;
     float view_angle_max;
@@ -379,7 +560,9 @@ protected:
     SDL_Surface* depth_image;
     SDL_Surface* zbuf;
     SDL_Color*   sdl_currentPalette;
+    VirtScreen*  main_virt_screen;
     int32_t parallax_table[256];
+    int mode;
 };
 
 } // namespace ShadowBox
