@@ -37,7 +37,7 @@ byte BaseCostumeRenderer::drawCostume(const VirtScreen &vs, int numStrips, const
 	else
 		_out.setPixels(vs.getPixels(0, 0));
 
-	if (shadowbox && a->_number == 1)
+	if (shadowbox)
 		_out = shadowbox->get_actor_surface(_out, a);
 
 	_actorX += _vm->_virtscr[kMainVirtScreen].xstart & 7;

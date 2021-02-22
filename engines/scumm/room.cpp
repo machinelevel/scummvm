@@ -32,6 +32,7 @@
 #include "scumm/scumm_v3.h"
 #include "scumm/sound.h"
 #include "scumm/util.h"
+#include "shadowbox/shadowbox.h"
 
 namespace Scumm {
 
@@ -229,7 +230,8 @@ void ScummEngine::startScene(int room, Actor *a, int objectNr) {
 		} else if (room == 90)
 			_system->setFeatureState(OSystem::kFeatureVirtualKeyboard, true);
 	}
-
+	if (shadowbox)
+		shadowbox->load_room_done(room, _roomWidth);
 }
 
 /**

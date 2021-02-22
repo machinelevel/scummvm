@@ -647,15 +647,6 @@ bool SdlEventSource::handleKeyDown(SDL_Event &ev, Common::Event &event) {
 	SDL_Keycode sdlKeycode = obtainKeycode(ev.key.keysym);
 	Common::KeyCode key = SDLToOSystemKeycode(sdlKeycode);
 
-	if (shadowbox)
-	{
-		if (key == Common::KEYCODE_s)
-			shadowbox->save_depth_image();
-		if (key == Common::KEYCODE_l)
-			shadowbox->load_depth_image();
-		if (key == Common::KEYCODE_BACKSLASH)
-			shadowbox->next_mode();
-	}
 	// Handle scroll lock as a key modifier
 	if (key == Common::KEYCODE_SCROLLOCK)
 		_scrollLock = !_scrollLock;
@@ -669,6 +660,9 @@ bool SdlEventSource::handleKeyDown(SDL_Event &ev, Common::Event &event) {
 	event.type = Common::EVENT_KEYDOWN;
 	event.kbd.keycode = key;
 	event.kbd.ascii = mapKey(sdlKeycode, (SDL_Keymod)ev.key.keysym.mod, obtainUnicode(ev.key.keysym));
+
+	if (shadowbox)
+		shadowbox->do_key(event.kbd.ascii);
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	event.kbdRepeat = ev.key.repeat;
@@ -704,6 +698,9 @@ bool SdlEventSource::handleMouseMotion(SDL_Event &ev, Common::Event &event) {
 }
 
 bool SdlEventSource::handleMouseButtonDown(SDL_Event &ev, Common::Event &event) {
+	if (shadowbox && ev.button.button == SDL_BUTTON_MIDDLE)
+		shadowbox->do_middle_mouse_button(true);
+
 	if (ev.button.button == SDL_BUTTON_LEFT)
 		event.type = Common::EVENT_LBUTTONDOWN;
 	else if (ev.button.button == SDL_BUTTON_RIGHT)
@@ -733,6 +730,9 @@ bool SdlEventSource::handleMouseButtonDown(SDL_Event &ev, Common::Event &event) 
 }
 
 bool SdlEventSource::handleMouseButtonUp(SDL_Event &ev, Common::Event &event) {
+	if (shadowbox && ev.button.button == SDL_BUTTON_MIDDLE)
+		shadowbox->do_middle_mouse_button(false);
+
 	if (ev.button.button == SDL_BUTTON_LEFT)
 		event.type = Common::EVENT_LBUTTONUP;
 	else if (ev.button.button == SDL_BUTTON_RIGHT)

@@ -1442,7 +1442,7 @@ when the "press F9" overlay is active,I get:
 		// Finally, blit all our changes to the screen
 		if (!_displayDisabled) {
 			if (shadowbox)
-				shadowbox->compose();
+				shadowbox->compose(_mouseBackup.x, _mouseBackup.y);
 			SDL_UpdateRects(_hwScreen, _numDirtyRects, _dirtyRectList);
 		}
 	}
