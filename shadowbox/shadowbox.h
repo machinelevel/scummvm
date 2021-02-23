@@ -485,8 +485,96 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         SDL_UnlockSurface(sdl_hwScreen);
     }
 
-    void compose_actor_foil(Foil* foil)
+    void compose_actor_foil(Foil* foil, int offset_x, int offset_y, int scale)
     {
+        if (foil && foil->sdl8 && foil->y2 > foil->y1)
+        {
+            SDL_LockSurface(foil->sdl8);
+            // SDL_Rect sr;
+            // SDL_Rect dr;
+            // sr.x = 0;
+            // dr.x = scale * (foil->x - main_virt_screen->xstart);
+            // sr.y = 0;
+            // dr.y = scale * (foil->y1 + main_virt_screen->topline);
+            // sr.w = foil->w;
+            // dr.w = scale * foil->w;
+            // sr.h = foil->y2 - foil->y1;
+            // dr.h = scale * sr.h;
+            uint16_t c16_table[256];
+            for (uint32_t i = 0; i < 256; ++i)
+            {
+                SDL_Color& cp = sdl_currentPalette[i];
+                c16_table[i] = (((uint16_t)cp.r & 0xf8) << 8) | (((uint16_t)cp.g & 0xf8) << 3) | (((uint16_t)cp.b & 0xf8) >> 3);
+            }
+
+            uint8_t* csrc = (uint8_t*)foil->sdl8->pixels;
+            uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
+            uint8_t* zdst = (uint8_t*)zbuf->pixels;
+            uint8_t* zsrc = (uint8_t*)depth_image->pixels;
+            int32_t w = foil->w;
+            int32_t h = foil->y2 - foil->y1;
+
+            cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
+            cdst += scale * (foil->y1 + main_virt_screen->topline) * (sdl_hwScreen->pitch >> 1);
+            int32_t xmax = scale * 320;
+
+            const uint8_t* pz = zsrc;
+            pz += (foil->y2 + main_virt_screen->topline) * depth_image->pitch;
+            pz += foil->x - (foil->w >> 1);
+            uint8_t character_z = 0;
+            if (pz >= zsrc && pz < zsrc + depth_image->h * depth_image->pitch)
+                character_z = *pz;
+            int32_t character_parallax = parallax_table[character_z];
+printf("actor %d depth is %d\n", (int)foil->actor->_number, (int)character_z);
+
+            for (int32_t row = 0; row < h; ++row)
+            {
+                for (int32_t srow = 0; srow < scale; ++srow)
+                {
+                    int32_t xdst = character_parallax + scale * (foil->x - main_virt_screen->xstart - (foil->w >> 1));
+                    for (int32_t col = 0; col < w; ++col)
+                    {
+                        uint8_t c8 = csrc[col];
+                        if (c8)
+                        {
+                            uint16_t cc = c16_table[c8];
+                            for (int s = 0; s < scale; ++s)
+                            {
+                                if (xdst >= 0 && xdst < xmax)
+                                {
+                                    cdst[xdst] = cc;
+    //                                zdst[xdst] = z;
+                                    xdst++;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            xdst += scale;
+                        }
+                    }
+                    cdst += sdl_hwScreen->pitch >> 1;
+                }
+                // for (int copy_row = 1; copy_row < scale; ++copy_row)
+                // {
+                //     memcpy(((uint8_t*)cdst) + sdl_hwScreen->pitch, cdst, sdl_hwScreen->pitch);
+                //     cdst += sdl_hwScreen->pitch >> 1;
+                // }
+                csrc += foil->sdl8->pitch;
+                zdst += zbuf->pitch;
+            }
+            SDL_UnlockSurface(foil->sdl8);
+        }
+    }
+
+    void compose_actors(int offset_x, int offset_y, int scale)
+    {
+        for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
+        {
+            Foil* foil = actor_foils[actor_num];
+            if (foil)
+                compose_actor_foil(foil, offset_x, offset_y, scale);
+        }
     }
 
     void compose_viewmaster_eye(int offset_x, int offset_y, int scale)
@@ -592,6 +680,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
             zsrc += depth_image->pitch;
             zdst += zbuf->pitch;
         }
+        compose_actors(offset_x, offset_y, scale);
     }
 
     void compose_viewmaster(int config)
@@ -673,7 +762,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
 //            compose_backdrop();
         }
 //        SDL_LockSurface(sdl_hwScreen);
-        if (mode != SHADOWBOX_MODE_OFF)
+        if (0 && mode != SHADOWBOX_MODE_OFF)
         {
             for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
             {
