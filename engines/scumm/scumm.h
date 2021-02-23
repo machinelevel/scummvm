@@ -855,8 +855,10 @@ protected:
 	uint32 _IM00_offs, _PALS_offs;
 
 	//ender: fullscreen
+public: // TODO: figure out how we're meant to trigger these
 	bool _fullRedraw, _bgNeedsRedraw;
 	bool _screenEffectFlag, _completeScreenRedraw;
+protected:
 	bool _disableFadeInEffect;
 
 	struct {

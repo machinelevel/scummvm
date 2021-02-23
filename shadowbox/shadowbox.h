@@ -45,10 +45,12 @@ public:
     }
     uint w;
     int h;
+    int x;
+    int y1;
+    int y2;
     const Actor* actor;
     SDL_Surface* sdl8;
     SDL_Surface* sdl16;
-    Surface surface;
 };
 
 class ShadowBox
@@ -57,7 +59,9 @@ public:
     ShadowBox()
     {
         mode = SHADOWBOX_MODE_OFF;
+        vm = NULL;
         _sdlmgr = NULL;
+        main_virt_screen = NULL;
         depth_image = NULL;
         selection_map = NULL;
         view_angle_min = -5.0f;
@@ -83,14 +87,19 @@ public:
     {
         // printf("Actor %d draw done: x:%d w:%d y1:%d y2:%d\n", 
         //     (int)actor->_number, actorX, (int)actor->_width, (int)actorY1, (int)actorY2);
-        main_virt_screen = mainVS;
+//printf("--> at %d\n", __LINE__);
+        if (scratch_surface.w == 0)
+            return;
+//printf("--> at %d\n", __LINE__);
 
         Foil* foil = actor_foils[actor->_number];
+
         if (!foil)
-        {
-            printf(">> Missing foil for actor %d\n", (int)actor->_number);
-            return;
-        }
+            foil = actor_foils[actor->_number] = new Foil();
+//printf("--> at %d\n", __LINE__);
+        foil->actor = actor;
+        main_virt_screen = mainVS;
+
         int x1a = actorX - (actor->_width >> 1);
         int x1 = x1a;
         int x2 = x1 + actor->_width;
@@ -103,15 +112,37 @@ public:
 //printf("]] at %d: \n", __LINE__);
         int h = y2 - y1;
         int w = x2 - x1;
+//printf("--> at %d\n", __LINE__);
+
+        if (!foil->sdl8 || foil->sdl8->w < w || foil->sdl8->h < h)
+        {
+            if (foil->sdl8)
+                SDL_FreeSurface(foil->sdl8);
+            foil->w = w;
+            foil->h = h;
+
+            foil->sdl8 = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, sdl_screen->format->BitsPerPixel,
+                                                                    sdl_screen->format->Rmask,
+                                                                    sdl_screen->format->Gmask,
+                                                                    sdl_screen->format->Bmask,
+                                                                    sdl_screen->format->Amask);
+printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w, h, foil->sdl8->format->BitsPerPixel);
+            if (foil->sdl8 == NULL)
+                error("allocating _screen failed");
+        }
+        SDL_SetPaletteColors(foil->sdl8->format->palette, sdl_currentPalette, 0, 256);
+//printf("--> at %d\n", __LINE__);
+
+
 //printf("]] at %d: \n", __LINE__);
         SDL_LockSurface(foil->sdl8);
 //printf("]] at %d: \n", __LINE__);
-        uint8_t* src = (uint8_t*)foil->surface.getPixels();
+        uint8_t* src = (uint8_t*)scratch_surface.getPixels();
         uint8_t* dst = (uint8_t*)foil->sdl8->pixels;
 //printf("]] at %d: \n", __LINE__);
         for (int row = 0; row < h; ++row)
         {
-            uint8_t* srow = src + (row + y1) * foil->surface.pitch + x1;
+            uint8_t* srow = src + (row + y1) * scratch_surface.pitch + x1;
             uint8_t* drow = dst + row * foil->sdl8->pitch + (x1 - x1a);
             for (int col = 0; col < w; ++col)
             {
@@ -121,41 +152,28 @@ public:
         }
 //printf("]] at %d: \n", __LINE__);
         SDL_UnlockSurface(foil->sdl8);
+        foil->x = actorX + main_virt_screen->xstart;
+        foil->y1 = actorY1 - main_virt_screen->topline;
+        foil->y2 = actorY2 - main_virt_screen->topline;
 //            (int)actor->_number, actorX, (int)actor->_width, (int)actor->_top, (int)actor->_bottom);
+//printf("--> at %d\n", __LINE__);
     }
 
-    Graphics::Surface& get_actor_surface(const Surface &vs_surface, const Actor *actor)
+    Graphics::Surface& get_actor_surface(Surface &vs_surface, ScummEngine *_vm)
     {
-        Foil* foil = actor_foils[actor->_number];
+        vm = _vm;
+//printf("--> at %d\n", __LINE__);
+        if (mode == SHADOWBOX_MODE_OFF)
+            return vs_surface;
 
-        if (!foil)
-            foil = actor_foils[actor->_number] = new Foil();
-        foil->actor = actor;
-        uint w = actor->_width;
-        int h = 200;
-        w = (w + 7) & ~7; // pad to 8 pixels
-        if (foil->w < w || foil->h < h)
+        if (scratch_surface.w < vs_surface.w || scratch_surface.h < vs_surface.h)
         {
-            foil->w = w;
-            foil->h = h;
-printf("At %d: create foil for actor %d: %dx%d\n", __LINE__, (int)actor->_number, (int)w, (int)h);
-            foil->surface.create(vs_surface.w, vs_surface.h, vs_surface.format);
-
-            if (foil->sdl8)
-                SDL_FreeSurface(foil->sdl8);
-
-            foil->sdl8 = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, sdl_screen->format->BitsPerPixel,
-                                                                    sdl_screen->format->Rmask,
-                                                                    sdl_screen->format->Gmask,
-                                                                    sdl_screen->format->Bmask,
-                                                                    sdl_screen->format->Amask);
-printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w, h, foil->sdl8->format->BitsPerPixel);
-            if (foil->sdl8 == NULL)
-                error("allocating _screen failed");
-            SDL_SetPaletteColors(foil->sdl8->format->palette, sdl_currentPalette, 0, 256);
+//printf("--> at %d\n", __LINE__);
+            scratch_surface.create(vs_surface.w, vs_surface.h, vs_surface.format);
         }
-//printf("At %d: return %dx%d foil for actor %d\n", __LINE__, foil->surface.w, foil->surface.h, (int)a->_number);
-        return foil->surface;
+//printf("At %d: return %dx%d foil for actor %d\n", __LINE__, scratch_surface.w, scratch_surface.h, (int)a->_number);
+//printf("--> at %d ssw %d ssh %d \n", __LINE__, (int)scratch_surface.w, (int)scratch_surface.h);
+        return scratch_surface;
     }
 
     void room_depth_filename(char* dest, size_t dest_len)
@@ -467,84 +485,8 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         SDL_UnlockSurface(sdl_hwScreen);
     }
 
-    void compose_backdrop()
+    void compose_actor_foil(Foil* foil)
     {
-        if (!(sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
-            return;
-        make_parallax_table(view_angle);
-        // depth_image is 320x200 8bit
-        // zbuf is 640x200 8bit
-        // sdl_tmpscreen is 323x203 16bit
-        // sdl_hwScreen is 640x480 16bit
-        SDL_LockSurface(depth_image);
-        SDL_LockSurface(zbuf);
-        SDL_LockSurface(sdl_tmpscreen);
-        SDL_LockSurface(sdl_hwScreen);
-        clear_zbuf();
-        uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
-        uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
-        uint16_t* cdst2 = cdst + (sdl_hwScreen->pitch >> 1);
-        uint8_t* zsrc = (uint8_t*)depth_image->pixels;
-        uint8_t* zdst = (uint8_t*)zbuf->pixels;
-        int32_t w = 320;
-        int32_t h = 200;
-        int32_t ww = w << 1;
-        for (int32_t row = 0; row < h; ++row)
-        {
-            uint16_t cprev = csrc[0];
-            uint8_t zprev = zsrc[0];
-            int32_t plxprev = parallax_table[zprev];
-            int32_t xdst = plxprev;
-            for (int32_t x = 0; x < xdst; ++x)
-            {
-                cdst[x] = cdst2[x] = cprev;
-                zdst[x] = zprev;
-            }
-            for (int32_t col = 0; col < w; ++col)
-            {
-                uint16_t c = csrc[col];
-                uint8_t z = zsrc[col];
-                int32_t plx = plxprev;
-                if (z != zprev)
-                    plx = parallax_table[z];
-                xdst += plx - plxprev;
-                if (xdst >= 0 && xdst < ww)
-                {
-                    if (z >= zdst[xdst])
-                    {
-                        cdst[xdst] = cdst2[xdst] = c;
-                        zdst[xdst] = z;
-                    }
-                }
-                xdst++;
-                if (xdst >= 0 && xdst < ww)
-                {
-                    if (z >= zdst[xdst])
-                    {
-                        cdst[xdst] = cdst2[xdst] = c;
-                        zdst[xdst] = z;
-                    }
-                }
-                xdst++;
-                cprev = c;
-                zprev = z;
-                plxprev = plx;
-            }
-            for (int32_t x = xdst; x < ww; ++x)
-            {
-                cdst[x] = cdst2[x] = cprev;
-                zdst[x] = zprev;
-            }
-            csrc += sdl_tmpscreen->pitch >> 1;
-            cdst += sdl_hwScreen->pitch;
-            cdst2 += sdl_hwScreen->pitch;
-            zsrc += depth_image->pitch;
-            zdst += zbuf->pitch;
-        }
-        SDL_UnlockSurface(depth_image);
-        SDL_UnlockSurface(zbuf);
-        SDL_UnlockSurface(sdl_tmpscreen);
-        SDL_UnlockSurface(sdl_hwScreen);
     }
 
     void compose_viewmaster_eye(int offset_x, int offset_y, int scale)
@@ -658,7 +600,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         // zbuf is 640x200 8bit
         // sdl_tmpscreen is 323x203 16bit
         // sdl_hwScreen is 640x480 16bit
-        if (!(sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
+        if (!(main_virt_screen && sdl_tmpscreen && sdl_hwScreen && depth_image && zbuf))
             return;
         SDL_LockSurface(selection_map);
         SDL_LockSurface(depth_image);
@@ -716,8 +658,10 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
         if (sel_y < 0)
             sel_y = 0;
         update_depth_editor();
+        int scale = 1;
         if (mode == SHADOWBOX_MODE_BASIC)
         {
+            scale = 2;
             compose_viewmaster(1);
         }
         else if (mode == SHADOWBOX_MODE_VIEWMASTER)
@@ -729,21 +673,31 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
 //            compose_backdrop();
         }
 //        SDL_LockSurface(sdl_hwScreen);
-        if (0)
+        if (mode != SHADOWBOX_MODE_OFF)
         {
             for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
             {
                 Foil* foil = actor_foils[actor_num];
                 if (foil)
                 {
+                    if (foil->y2 <= foil->y1)
+                        continue;
                     SDL_Rect sr;
                     SDL_Rect dr;
                     sr.x = 0;
-                    dr.x = 32;
-                    sr.y = dr.y = 0;
-                    sr.w = dr.w = foil->w;
-                    sr.h = dr.h = foil->h;
+                    dr.x = scale * (foil->x - main_virt_screen->xstart);
+                    sr.y = 0;
+                    dr.y = scale * (foil->y1 + main_virt_screen->topline);
+                    sr.w = foil->w;
+                    dr.w = scale * foil->w;
+                    sr.h = foil->y2 - foil->y1;
+                    dr.h = scale * sr.h;
+                    if (dr.x < 0 || dr.x + dr.w >= 640)
+                        continue;
+                    // if (dr.y < 0 || dr.y + dr.h >= 400)
+                    //     continue;
     //                SDL_LockSurface(foil->sdl8);
+
                     if (SDL_BlitSurface(foil->sdl8, &sr, sdl_hwScreen, &dr) != 0)
                         error("SDL_BlitSurface failed: %s", SDL_GetError());
     //                SDL_UnlockSurface(foil->sdl8);
@@ -790,6 +744,8 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, w
     {
         mode = to_mode;
         clear_to_black();
+        if (vm)
+            vm->_fullRedraw = true;
         if (mode == SHADOWBOX_MODE_OFF)
         {
 //            _sdlmgr->shadowbox_set_hw_screen(640, 400);
@@ -854,6 +810,7 @@ protected:
     float view_angle;
     Foil* actor_foils[SBOX_MAX_NUM_ACTORS];
     SurfaceSdlGraphicsManager* _sdlmgr;
+    ScummEngine* vm;
     SDL_Surface* sdl_screen;
     SDL_Surface* sdl_tmpscreen;
     SDL_Surface* sdl_hwScreen;
@@ -871,6 +828,7 @@ protected:
     int sel_x, sel_y;
     bool middle_mouse_down;
     bool highlight_selection;
+    Surface scratch_surface;
 };
 
 } // namespace ShadowBox
