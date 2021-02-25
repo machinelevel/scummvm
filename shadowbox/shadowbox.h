@@ -469,7 +469,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         {
             float t = (float)i / 255.0;
             float parallax = near_parallax + t * (far_parallax - near_parallax);
-            parallax_table[i] = uint32_t(parallax);
+            parallax_table[i] = int32_t(parallax);
         }
     }
 
@@ -525,7 +525,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
             if (pz >= zsrc && pz < zsrc + depth_image->h * depth_image->pitch)
                 character_z = *pz;
             int32_t character_parallax = parallax_table[character_z];
-printf("actor %d depth is %d\n", (int)foil->actor->_number, (int)character_z);
+//printf("actor %d depth is %d\n", (int)foil->actor->_number, (int)character_z);
 
             for (int32_t row = 0; row < h; ++row)
             {
