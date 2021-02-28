@@ -1441,8 +1441,6 @@ when the "press F9" overlay is active,I get:
 
 		// Finally, blit all our changes to the screen
 		if (!_displayDisabled) {
-			if (shadowbox)
-				shadowbox->compose(_mouseBackup.x, _mouseBackup.y);
 			SDL_UpdateRects(_hwScreen, _numDirtyRects, _dirtyRectList);
 		}
 	}
@@ -2739,15 +2737,12 @@ void SurfaceSdlGraphicsManager::SDL_UpdateRects(SDL_Surface *screen, int numrect
 	viewport.w = _activeArea.drawRect.width();
 	viewport.h = _activeArea.drawRect.height();
 
-	SDL_RenderClear(_renderer);
 	if (shadowbox)
 	{
-		if (shadowbox->compose_gpu(_renderer, _screenTexture, &viewport))
-		{
-			SDL_RenderPresent(_renderer);
+		if (shadowbox->compose(_mouseBackup.x, _mouseBackup.y, _screenTexture, &viewport))
 			return;
-		}
 	}
+	SDL_RenderClear(_renderer);
 	SDL_RenderCopy(_renderer, _screenTexture, NULL, &viewport);
 	SDL_RenderPresent(_renderer);
 }

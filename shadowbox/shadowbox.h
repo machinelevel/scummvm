@@ -539,6 +539,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
 
     void compose_actor_foil(Foil* foil, int offset_x, int offset_y, int scale, float viewport_scale)
     {
+        make_actor_pal565(foil);
         int32_t w = foil->w;
         int32_t h = foil->y2 - foil->y1;
         if (mode == SHADOWBOX_MODE_GPU)
@@ -794,10 +795,39 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         }
     }
 
-    void compose(int mouseX, int mouseY)
+    bool compose_gpu(SDL_Texture* screen_texture,
+                     const SDL_Rect* viewport)
     {
         static uint32_t report_skip = 0;
         TIC();
+
+        SDL_RenderClear(sdl_renderer);
+        SDL_Rect dst_rect = *viewport;
+        SDL_RenderCopy(sdl_renderer, screen_texture, NULL, &dst_rect);
+        int offset_x = 0;
+        int offset_y = 0;
+        int scale = 2;
+        compose_actors(offset_x, offset_y, scale, (float)viewport->w / 640.0f);
+
+        if (report_skip++ > 20)
+        {
+            report_skip = 0;
+            printf("gpu compose time = %f ms\n",  0.001 * (float)TOC());
+        }
+        SDL_RenderPresent(sdl_renderer);
+        return true;
+    }
+
+    bool compose(int mouseX, int mouseY, SDL_Texture* screen_texture, const SDL_Rect* viewport)
+    {
+        if (mode == SHADOWBOX_MODE_OFF)
+            return false;
+        if (mode == SHADOWBOX_MODE_GPU)
+            return compose_gpu(screen_texture, viewport);
+
+        static uint32_t report_skip = 0;
+        TIC();
+        SDL_RenderClear(sdl_renderer);
         mouse_x = mouseX;
         mouse_y = mouseY;
         sel_x = mouse_x - 2;
@@ -818,6 +848,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
             compose_viewmaster(2);
             report = true;
         }
+        SDL_RenderCopy(sdl_renderer, screen_texture, NULL, viewport);
         if (report)
         {
             if (report_skip++ > 20)
@@ -826,36 +857,9 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
                 printf("cpu compose time = %f ms\n",  0.001 * (float)TOC());
             }
         }
-    }
-
-    bool compose_gpu(SDL_Renderer* renderer,
-                     SDL_Texture* screen_texture,
-                     const SDL_Rect* viewport)
-    {
-        if (mode != SHADOWBOX_MODE_GPU)
-            return false;
-        static uint32_t report_skip = 0;
-        TIC();
-
-        SDL_Rect dst_rect = *viewport;
-        SDL_RenderCopy(renderer, screen_texture, NULL, &dst_rect);
-        int offset_x = 0;
-        int offset_y = 0;
-        int scale = 2;
-        compose_actors(offset_x, offset_y, scale, (float)viewport->w / 640.0f);
-
-        if (report_skip++ > 20)
-        {
-            report_skip = 0;
-            printf("gpu compose time = %f ms\n",  0.001 * (float)TOC());
-        }
+        SDL_RenderPresent(sdl_renderer);
         return true;
     }
-
-    // void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h)
-    // {
-    //     _system->copyRectToScreen(buf, pitch, x, y, w, h);
-    // }
 
     int get_mode() const
     {
