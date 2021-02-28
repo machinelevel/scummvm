@@ -23,6 +23,34 @@
 #ifndef COMMON_FORBIDDEN_H
 #define COMMON_FORBIDDEN_H
 
+// shadowbox overrides
+// #define FORBIDDEN_SYMBOL_EXCEPTION_clock
+// #define FORBIDDEN_SYMBOL_EXCEPTION_mktime
+// #define FORBIDDEN_SYMBOL_EXCEPTION_difftime
+// #define FORBIDDEN_SYMBOL_EXCEPTION_time
+// #define FORBIDDEN_SYMBOL_EXCEPTION_asctime
+// #define FORBIDDEN_SYMBOL_EXCEPTION_gmtime
+// #define FORBIDDEN_SYMBOL_EXCEPTION_localtime
+// #define FORBIDDEN_SYMBOL_EXCEPTION_ctime
+// #define FORBIDDEN_SYMBOL_EXCEPTION_printf
+#define FORBIDDEN_SYMBOL_ALLOW_ALL
+/*
+ej's note: I've allowed all for the shadowbox experiment because
+when trying to add simple timers to my code I've been driven to madness by
+errors like this:
+
+make
+    C++      backends/graphics/surfacesdl/surfacesdl-graphics.o
+In file included from ./common/scummsys.h:467,
+                 from backends/graphics/surfacesdl/surfacesdl-graphics.cpp:23:
+./common/forbidden.h:69:89: error: expected initializer before ‘SYMBOL’
+ #define FORBIDDEN_SYMBOL_REPLACEMENT FORBIDDEN_look_at_common_forbidden_h_for_more_info SYMBOL !%*
+                                                                                         ^~~~~~
+make: *** [Makefile.common:159: backends/graphics/surfacesdl/surfacesdl-graphics.o] Error 1
+
+...which give no indication what symbol is the problem or where the problem occurred.
+*/
+
 /**
  * @file
  * This header file is meant to help ensure that engines and

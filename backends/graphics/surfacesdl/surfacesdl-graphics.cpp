@@ -1030,7 +1030,7 @@ printf("]] at %s:%d _tmpscreen2 is %dx%d %d bytes/pixel\n", __FILE__, __LINE__, 
 		InitScalers(565);
 
 	if (shadowbox)
-		shadowbox->setup_sdl(this, _screen, _tmpscreen, _hwScreen, _currentPalette);
+		shadowbox->setup_sdl(this, _screen, _renderer, _tmpscreen, _hwScreen, _currentPalette);
 
 	return true;
 }
@@ -2740,6 +2740,14 @@ void SurfaceSdlGraphicsManager::SDL_UpdateRects(SDL_Surface *screen, int numrect
 	viewport.h = _activeArea.drawRect.height();
 
 	SDL_RenderClear(_renderer);
+	if (shadowbox)
+	{
+		if (shadowbox->compose_gpu(_renderer, _screenTexture, &viewport))
+		{
+			SDL_RenderPresent(_renderer);
+			return;
+		}
+	}
 	SDL_RenderCopy(_renderer, _screenTexture, NULL, &viewport);
 	SDL_RenderPresent(_renderer);
 }
@@ -2777,3 +2785,6 @@ int SurfaceSdlGraphicsManager::SDL_SetColorKey(SDL_Surface *surface, Uint32 flag
 #endif // SDL_VERSION_ATLEAST(2, 0, 0)
 
 #endif
+
+
+#include "shadowbox/shadowbox_utils.cpp"

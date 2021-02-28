@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <vector>
-#undef printf
 #include "engines/scumm/gfx.h"
 #include "engines/scumm/actor.h"
 #include "graphics/surface.h"
@@ -23,21 +22,25 @@ using namespace Graphics;
 
 namespace ShadowBoxNs {
 
+extern void TIC();
+extern float TOC();
+
 #define SBOX_MAX_NUM_ACTORS 256
 
 enum {
     SHADOWBOX_MODE_OFF,
     SHADOWBOX_MODE_BASIC,
+    SHADOWBOX_MODE_GPU,
     SHADOWBOX_MODE_VIEWMASTER,
     SHADOWBOX_MODE_HOWMANY // just to count and terminate
 };
-#define NUM_MODES_TO_CYCLE 2
+#define NUM_MODES_TO_CYCLE 3
 
 class Foil
 {
 public:
     Foil()
-    :w(0), h(0), actor(NULL), sdl8(NULL), sdl16(NULL)
+    :w(0), h(0), actor(NULL), sdl8(NULL), sdl16(NULL), sdltex16(NULL)
     {
     }
     ~Foil()
@@ -51,6 +54,8 @@ public:
     const Actor* actor;
     SDL_Surface* sdl8;
     SDL_Surface* sdl16;
+    SDL_Texture* sdltex16;
+    uint16_t pal565[256];
 };
 
 class ShadowBox
@@ -61,6 +66,7 @@ public:
         mode = SHADOWBOX_MODE_OFF;
         vm = NULL;
         _sdlmgr = NULL;
+        sdl_renderer = NULL;
         main_virt_screen = NULL;
         depth_image = NULL;
         selection_map = NULL;
@@ -100,6 +106,12 @@ public:
         foil->actor = actor;
         main_virt_screen = mainVS;
 
+        if (foil->sdl8)
+        {
+            SDL_SetPaletteColors(foil->sdl8->format->palette, sdl_currentPalette, 0, 256);
+            make_actor_pal565(foil);
+        }
+
         int x1a = actorX - (actor->_width >> 1);
         int x1 = x1a;
         int x2 = x1 + actor->_width;
@@ -114,47 +126,72 @@ public:
         int w = x2 - x1;
 //printf("--> at %d\n", __LINE__);
 
-        if (!foil->sdl8 || foil->sdl8->w < w || foil->sdl8->h < h)
+        if (!foil->sdl8 || !foil->sdltex16 || foil->sdl8->w < w || foil->sdl8->h < h)
         {
             if (foil->sdl8)
                 SDL_FreeSurface(foil->sdl8);
+            if (foil->sdltex16)
+                SDL_DestroyTexture(foil->sdltex16);
             foil->w = w;
             foil->h = h;
-
+            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+            foil->sdltex16 = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_RGB565,
+                                               SDL_TEXTUREACCESS_STREAMING, w, h);
             foil->sdl8 = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, sdl_screen->format->BitsPerPixel,
                                                                     sdl_screen->format->Rmask,
                                                                     sdl_screen->format->Gmask,
                                                                     sdl_screen->format->Bmask,
                                                                     sdl_screen->format->Amask);
+            // foil->sdl16 = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h,
+            //             16,
+            //             sdl_hwScreen->format->Rmask,
+            //             sdl_hwScreen->format->Gmask,
+            //             sdl_hwScreen->format->Bmask,
+            //             sdl_hwScreen->format->Amask);
 printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w, h, foil->sdl8->format->BitsPerPixel);
             if (foil->sdl8 == NULL)
-                error("allocating _screen failed");
+                error("allocating 8-bit foil failed");
+            // if (foil->sdl16 == NULL)
+            //     error("allocating 16-bit foil failed");
+            if (foil->sdltex16 == NULL)
+                error("allocating 16-bit-texture foil failed");
         }
-        SDL_SetPaletteColors(foil->sdl8->format->palette, sdl_currentPalette, 0, 256);
 //printf("--> at %d\n", __LINE__);
 
 
 //printf("]] at %d: \n", __LINE__);
+        uint16_t* dsttex16_pixels = NULL;
+        int dsttex16_pitch = 0;
+        SDL_LockTexture(foil->sdltex16, NULL, (void**)&dsttex16_pixels, &dsttex16_pitch);
         SDL_LockSurface(foil->sdl8);
+//        SDL_LockSurface(foil->sdl16);
 //printf("]] at %d: \n", __LINE__);
         uint8_t* src = (uint8_t*)scratch_surface.getPixels();
-        uint8_t* dst = (uint8_t*)foil->sdl8->pixels;
+        uint8_t* dst8 = (uint8_t*)foil->sdl8->pixels;
+//        uint16_t* dst16 = (uint16_t*)foil->sdl16->pixels;
 //printf("]] at %d: \n", __LINE__);
         for (int row = 0; row < h; ++row)
         {
             uint8_t* srow = src + (row + y1) * scratch_surface.pitch + x1;
-            uint8_t* drow = dst + row * foil->sdl8->pitch + (x1 - x1a);
+            uint8_t* drow8 = dst8 + row * foil->sdl8->pitch + (x1 - x1a);
+//            uint16_t* drow16 = dst16 + row * (foil->sdl16->pitch >> 1) + (x1 - x1a);
+            uint16_t* dsttex16 = dsttex16_pixels + row * (dsttex16_pitch >> 1) + (x1 - x1a);
             for (int col = 0; col < w; ++col)
             {
-                drow[col] = srow[col];
+                dsttex16[col] = foil->pal565[srow[col]];
+//                drow16[col] = foil->pal565[srow[col]];
+                drow8[col] = srow[col];
                 srow[col] = 0;
             }
         }
 //printf("]] at %d: \n", __LINE__);
+        SDL_UnlockTexture(foil->sdltex16);
         SDL_UnlockSurface(foil->sdl8);
+//        SDL_UnlockSurface(foil->sdl16);
         foil->x = actorX + main_virt_screen->xstart;
         foil->y1 = actorY1 - main_virt_screen->topline;
         foil->y2 = actorY2 - main_virt_screen->topline;
+//        transfer_actor_to_texture(foil);
 //            (int)actor->_number, actorX, (int)actor->_width, (int)actor->_top, (int)actor->_bottom);
 //printf("--> at %d\n", __LINE__);
     }
@@ -433,11 +470,12 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         return view_angle;
     }
 
-    void setup_sdl(SurfaceSdlGraphicsManager* sdlmgr, SDL_Surface* _screen,
+    void setup_sdl(SurfaceSdlGraphicsManager* sdlmgr, SDL_Surface* _screen, SDL_Renderer* _renderer,
                    SDL_Surface* _tmpscreen, SDL_Surface* _hwScreen, SDL_Color* _currentPalette)
     {
         _sdlmgr = sdlmgr;
         sdl_screen = _screen;
+        sdl_renderer = _renderer;
         sdl_tmpscreen = _tmpscreen;
         sdl_hwScreen = _hwScreen;
         sdl_currentPalette = _currentPalette;
@@ -485,34 +523,44 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         SDL_UnlockSurface(sdl_hwScreen);
     }
 
-    void compose_actor_foil(Foil* foil, int offset_x, int offset_y, int scale)
+    void make_actor_pal565(Foil* foil)
     {
         if (foil && foil->sdl8 && foil->y2 > foil->y1)
         {
             SDL_LockSurface(foil->sdl8);
-            // SDL_Rect sr;
-            // SDL_Rect dr;
-            // sr.x = 0;
-            // dr.x = scale * (foil->x - main_virt_screen->xstart);
-            // sr.y = 0;
-            // dr.y = scale * (foil->y1 + main_virt_screen->topline);
-            // sr.w = foil->w;
-            // dr.w = scale * foil->w;
-            // sr.h = foil->y2 - foil->y1;
-            // dr.h = scale * sr.h;
-            uint16_t c16_table[256];
             for (uint32_t i = 0; i < 256; ++i)
             {
                 SDL_Color& cp = sdl_currentPalette[i];
-                c16_table[i] = (((uint16_t)cp.r & 0xf8) << 8) | (((uint16_t)cp.g & 0xf8) << 3) | (((uint16_t)cp.b & 0xf8) >> 3);
+                foil->pal565[i] = (((uint16_t)cp.r & 0xf8) << 8) | (((uint16_t)cp.g & 0xf8) << 3) | (((uint16_t)cp.b & 0xf8) >> 3);
             }
+            SDL_UnlockSurface(foil->sdl8);
+        }
+    }
 
+    void compose_actor_foil(Foil* foil, int offset_x, int offset_y, int scale, float viewport_scale)
+    {
+        int32_t w = foil->w;
+        int32_t h = foil->y2 - foil->y1;
+        if (mode == SHADOWBOX_MODE_GPU)
+        {
+            int character_parallax = 0;
+            float fx = viewport_scale * (offset_x + character_parallax + scale * (foil->x - main_virt_screen->xstart - (foil->w >> 1)));
+            float fy = viewport_scale * (offset_y + scale * (foil->y2 + main_virt_screen->topline));
+            SDL_Rect dst_rect;
+            dst_rect.x = (int)fx;
+            dst_rect.y = (int)fy;
+            dst_rect.w = (int)(w * scale * viewport_scale);
+            dst_rect.h = (int)(h * scale * viewport_scale);
+            SDL_RenderCopy(sdl_renderer, foil->sdltex16, NULL, &dst_rect);
+            return;
+        }
+        if (foil && foil->sdl8 && foil->y2 > foil->y1)
+        {
+            SDL_LockSurface(foil->sdl8);
             uint8_t* csrc = (uint8_t*)foil->sdl8->pixels;
             uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
             uint8_t* zdst = (uint8_t*)zbuf->pixels;
             uint8_t* zsrc = (uint8_t*)depth_image->pixels;
-            int32_t w = foil->w;
-            int32_t h = foil->y2 - foil->y1;
 
             cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
             cdst += scale * (foil->y1 + main_virt_screen->topline) * (sdl_hwScreen->pitch >> 1);
@@ -537,7 +585,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
                         uint8_t c8 = csrc[col];
                         if (c8)
                         {
-                            uint16_t cc = c16_table[c8];
+                            uint16_t cc = foil->pal565[c8];
                             for (int s = 0; s < scale; ++s)
                             {
                                 if (xdst >= 0 && xdst < xmax)
@@ -567,13 +615,23 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         }
     }
 
-    void compose_actors(int offset_x, int offset_y, int scale)
+    // void transfer_actor_to_texture(Foil* foil)
+    // {
+    //     if (foil && foil->sdl16 && foil->sdltex16 && foil->y2 > foil->y1)
+    //     {
+    //         SDL_LockSurface(foil->sdl16);
+    //         SDL_UpdateTexture(foil->sdltex16, nullptr, foil->sdl16->pixels, foil->sdl16->pitch);
+    //         SDL_UnlockSurface(foil->sdl16);
+    //     }
+    // }
+
+    void compose_actors(int offset_x, int offset_y, int scale, float viewport_scale)
     {
         for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
         {
             Foil* foil = actor_foils[actor_num];
             if (foil)
-                compose_actor_foil(foil, offset_x, offset_y, scale);
+                compose_actor_foil(foil, offset_x, offset_y, scale, viewport_scale);
         }
     }
 
@@ -680,7 +738,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
             zsrc += depth_image->pitch;
             zdst += zbuf->pitch;
         }
-        compose_actors(offset_x, offset_y, scale);
+        compose_actors(offset_x, offset_y, scale, 1.0f);
     }
 
     void compose_viewmaster(int config)
@@ -738,6 +796,8 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
 
     void compose(int mouseX, int mouseY)
     {
+        static uint32_t report_skip = 0;
+        TIC();
         mouse_x = mouseX;
         mouse_y = mouseY;
         sel_x = mouse_x - 2;
@@ -747,65 +807,49 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         if (sel_y < 0)
             sel_y = 0;
         update_depth_editor();
-        int scale = 1;
+        bool report = false;
         if (mode == SHADOWBOX_MODE_BASIC)
         {
-            scale = 2;
             compose_viewmaster(1);
+            report = true;
         }
         else if (mode == SHADOWBOX_MODE_VIEWMASTER)
         {
             compose_viewmaster(2);
+            report = true;
         }
-        else
+        if (report)
         {
-//            compose_backdrop();
-        }
-//        SDL_LockSurface(sdl_hwScreen);
-        if (0 && mode != SHADOWBOX_MODE_OFF)
-        {
-            for (uint32_t actor_num = 0; actor_num < SBOX_MAX_NUM_ACTORS; ++actor_num)
+            if (report_skip++ > 20)
             {
-                Foil* foil = actor_foils[actor_num];
-                if (foil)
-                {
-                    if (foil->y2 <= foil->y1)
-                        continue;
-                    SDL_Rect sr;
-                    SDL_Rect dr;
-                    sr.x = 0;
-                    dr.x = scale * (foil->x - main_virt_screen->xstart);
-                    sr.y = 0;
-                    dr.y = scale * (foil->y1 + main_virt_screen->topline);
-                    sr.w = foil->w;
-                    dr.w = scale * foil->w;
-                    sr.h = foil->y2 - foil->y1;
-                    dr.h = scale * sr.h;
-                    if (dr.x < 0 || dr.x + dr.w >= 640)
-                        continue;
-                    // if (dr.y < 0 || dr.y + dr.h >= 400)
-                    //     continue;
-    //                SDL_LockSurface(foil->sdl8);
-
-                    if (SDL_BlitSurface(foil->sdl8, &sr, sdl_hwScreen, &dr) != 0)
-                        error("SDL_BlitSurface failed: %s", SDL_GetError());
-    //                SDL_UnlockSurface(foil->sdl8);
-                }
+                report_skip = 0;
+                printf("cpu compose time = %f ms\n",  0.001 * (float)TOC());
             }
         }
-//        SDL_UnlockSurface(sdl_hwScreen);
-        if (0)
+    }
+
+    bool compose_gpu(SDL_Renderer* renderer,
+                     SDL_Texture* screen_texture,
+                     const SDL_Rect* viewport)
+    {
+        if (mode != SHADOWBOX_MODE_GPU)
+            return false;
+        static uint32_t report_skip = 0;
+        TIC();
+
+        SDL_Rect dst_rect = *viewport;
+        SDL_RenderCopy(renderer, screen_texture, NULL, &dst_rect);
+        int offset_x = 0;
+        int offset_y = 0;
+        int scale = 2;
+        compose_actors(offset_x, offset_y, scale, (float)viewport->w / 640.0f);
+
+        if (report_skip++ > 20)
         {
-            SDL_Rect sr;
-            SDL_Rect dr;
-            sr.x = 0;
-            dr.x = 128;
-            sr.y = dr.y = 0;
-            sr.w = dr.w = 320;
-            sr.h = dr.h = 200;
-            if (SDL_BlitSurface(depth_image, &sr, sdl_hwScreen, &dr) != 0)
-                error("SDL_BlitSurface failed: %s", SDL_GetError());
+            report_skip = 0;
+            printf("gpu compose time = %f ms\n",  0.001 * (float)TOC());
         }
+        return true;
     }
 
     // void copyRectToScreen(const void *buf, int pitch, int x, int y, int w, int h)
@@ -901,6 +945,7 @@ protected:
     SurfaceSdlGraphicsManager* _sdlmgr;
     ScummEngine* vm;
     SDL_Surface* sdl_screen;
+    SDL_Renderer* sdl_renderer;
     SDL_Surface* sdl_tmpscreen;
     SDL_Surface* sdl_hwScreen;
     SDL_Surface* depth_image;
