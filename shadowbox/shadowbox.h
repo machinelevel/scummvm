@@ -30,11 +30,12 @@ extern float TOC();
 enum {
     SHADOWBOX_MODE_OFF,
     SHADOWBOX_MODE_BASIC,
+    SHADOWBOX_MODE_CPU_SHADER,
     SHADOWBOX_MODE_GPU,
     SHADOWBOX_MODE_VIEWMASTER,
     SHADOWBOX_MODE_HOWMANY // just to count and terminate
 };
-#define NUM_MODES_TO_CYCLE 3
+#define NUM_MODES_TO_CYCLE 4
 
 class Foil
 {
@@ -638,20 +639,32 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         }
     }
 
+    uint32_t backdrop_cpu_shader(float dest_x, float dest_y)
+    {
+        // do the same bd compose, but thinking like a shader...
+        // return bit-packed 08,depth8,color16
+//        return 0x0001f00f;
+        float near_parallax = parallax_table[0];
+        float far_parallax = parallax_table[255];
+        uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
+        uint8_t*  zsrc = (uint8_t*)depth_image->pixels;
+        int c_src_x = (int)(dest_x * 320);
+        int c_src_y = (int)(dest_y * 200 + 0.5);
+        csrc += 1 + (c_src_y + 1) * (sdl_tmpscreen->pitch >> 1);  // this addreses an off-by-1
+        zsrc += main_virt_screen->xstart;
+        zsrc += c_src_y * depth_image->pitch;
+        uint16_t c = csrc[c_src_x];
+        uint8_t z = zsrc[c_src_x];
+//c |= 0xf000;
+        return (((uint32_t)z) << 16) | c;
+    }
+
     void compose_viewmaster_eye(bool gpu, int offset_x, int offset_y, int scale, float viewport_scale,
                                 SDL_Texture* screen_texture, const SDL_Rect* viewport)
     {
-        uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
-        csrc += sdl_tmpscreen->pitch >> 1;  // this addreses an off-by-1
-        uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
-        uint8_t* sel = (uint8_t*)selection_map->pixels;
-        uint8_t* zsrc = (uint8_t*)depth_image->pixels;
-        uint8_t* zdst = (uint8_t*)zbuf->pixels;
         int32_t w = 320;
         int32_t h = 200;
-        sel += main_virt_screen->xstart;
-        zsrc += main_virt_screen->xstart;
-        cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
+        bool cpu_shader = mode == SHADOWBOX_MODE_CPU_SHADER;
 
         if (gpu)
         {
@@ -660,94 +673,133 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         }
         else
         {
-            for (int32_t row = 0; row < h; ++row)
+            if (cpu_shader)
             {
-                uint16_t cprev = csrc[0];
-                uint8_t zprev = zsrc[0];
-                int32_t plxprev = parallax_table[zprev];
-                int32_t xdst = plxprev;
-                for (int32_t x = 0; x < xdst; ++x)
+                uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
+                uint8_t*  zdst = (uint8_t*)zbuf->pixels;
+                cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
+                for (int32_t row = 0; row < h; ++row)
                 {
-                    cdst[x] = 0;
-                    zdst[x] = 0;
-                }
-                for (int32_t col = 0; col < w; ++col)
-                {
-                    uint16_t c = csrc[col+1];  // this addreses an off-by-1
-                    uint8_t z = zsrc[col];
-                    int32_t plx = plxprev;
-                    if (z != zprev)
-                        plx = parallax_table[z];
-                    int32_t new_xdst = (scale * col) + plx;
-                    uint16_t cc = c;
-                    if (edit_depth >= 0 && (int)z == edit_depth)
-                        cc = 0x00ff;
-                    if (col == sel_x && row == sel_y)
-                        cc = 0xffff;
-                    if (sel[col])
-                        cc = 0xffe0; // bright for selection
-                    if (xdst < new_xdst)
+                    float y = (float)row / (float)h;
+                    for (int32_t col = 0; col < scale*w; ++col)
                     {
-                        // Fill in any empty space with the lower z value
-                        uint16_t cfill = c;
-                        uint8_t zfill = z;
-                        if (zprev < z)
-                        {
-                            cfill = cprev;
-                            zfill = zprev;
-                        }
-                        while (xdst < new_xdst)
-                        {
-                            if (xdst >= 0 && xdst < (w * scale))
-                            {
-                                if (zfill > zdst[xdst])
-                                {
-                                    cdst[xdst] = cfill;
-                                    zdst[xdst] = zfill;
-                                }
-                            }
-                            xdst++;
-                        }
+                        float x = (float)col / (float)(scale*w);
+                        uint32_t r = backdrop_cpu_shader(x, y);
+                        uint16_t c = r & 0x0000ffff;
+                        uint8_t z = (r >> 16) & 0x00ff;
+                        cdst[col] = c;
+                        zdst[col] = z;
                     }
-                    xdst = new_xdst;
-                    for (int s = 0; s < scale; ++s)
+                    // Replicate rows
+                    for (int copy_row = 1; copy_row < scale; ++copy_row)
                     {
-                        if (xdst >= 0 && xdst < (w * scale))
+                        memcpy(((uint8_t*)cdst) + sdl_hwScreen->pitch, cdst, sdl_hwScreen->pitch);
+                        cdst += sdl_hwScreen->pitch >> 1;
+                    }
+                    cdst += sdl_hwScreen->pitch >> 1;
+                    zdst += zbuf->pitch;
+                }
+            }
+            else
+            {
+                uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
+                csrc += sdl_tmpscreen->pitch >> 1;  // this addreses an off-by-1
+                uint16_t* cdst = (uint16_t*)sdl_hwScreen->pixels;
+                uint8_t* sel = (uint8_t*)selection_map->pixels;
+                uint8_t* zsrc = (uint8_t*)depth_image->pixels;
+                uint8_t* zdst = (uint8_t*)zbuf->pixels;
+                sel += main_virt_screen->xstart;
+                zsrc += main_virt_screen->xstart;
+                cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
+                for (int32_t row = 0; row < h; ++row)
+                {
+                    uint16_t cprev = csrc[0];
+                    uint8_t zprev = zsrc[0];
+                    int32_t plxprev = parallax_table[zprev];
+                    int32_t xdst = plxprev;
+                    for (int32_t x = 0; x < xdst; ++x)
+                    {
+                        cdst[x] = 0;
+                        zdst[x] = 0;
+                    }
+                    for (int32_t col = 0; col < w; ++col)
+                    {
+                        uint16_t c = csrc[col+1];  // this addreses an off-by-1
+                        uint8_t z = zsrc[col];
+                        int32_t plx = plxprev;
+                        if (z != zprev)
+                            plx = parallax_table[z];
+                        int32_t new_xdst = (scale * col) + plx;
+                        uint16_t cc = c;
+                        if (edit_depth >= 0 && (int)z == edit_depth)
+                            cc = 0x00ff;
+                        if (col == sel_x && row == sel_y)
+                            cc = 0xffff;
+                        if (sel[col])
+                            cc = 0xffe0; // bright for selection
+                        if (xdst < new_xdst)
                         {
-                            if (z >= zdst[xdst])
+                            // Fill in any empty space with the lower z value
+                            uint16_t cfill = c;
+                            uint8_t zfill = z;
+                            if (zprev < z)
                             {
-                                cdst[xdst] = cc;
-                                zdst[xdst] = z;
+                                cfill = cprev;
+                                zfill = zprev;
+                            }
+                            while (xdst < new_xdst)
+                            {
+                                if (xdst >= 0 && xdst < (w * scale))
+                                {
+                                    if (zfill > zdst[xdst])
+                                    {
+                                        cdst[xdst] = cfill;
+                                        zdst[xdst] = zfill;
+                                    }
+                                }
                                 xdst++;
                             }
                         }
+                        xdst = new_xdst;
+                        for (int s = 0; s < scale; ++s)
+                        {
+                            if (xdst >= 0 && xdst < (w * scale))
+                            {
+                                if (z >= zdst[xdst])
+                                {
+                                    cdst[xdst] = cc;
+                                    zdst[xdst] = z;
+                                    xdst++;
+                                }
+                            }
+                        }
+                        cprev = c;
+                        zprev = z;
+                        plxprev = plx;
                     }
-                    cprev = c;
-                    zprev = z;
-                    plxprev = plx;
-                }
-                while (xdst < (w * scale))
-                {
-                    if (xdst >= 0)
+                    while (xdst < (w * scale))
                     {
-                        if (!zdst[xdst])
-                            cdst[xdst] = 0;
+                        if (xdst >= 0)
+                        {
+                            if (!zdst[xdst])
+                                cdst[xdst] = 0;
+                        }
+                        xdst++;
                     }
-                    xdst++;
-                }
-                // replicate scaled rows
-                for (int copy_row = 1; copy_row < scale; ++copy_row)
-                {
-                    memcpy(((uint8_t*)cdst) + sdl_hwScreen->pitch, cdst, sdl_hwScreen->pitch);
+                    // replicate scaled rows
+                    for (int copy_row = 1; copy_row < scale; ++copy_row)
+                    {
+                        memcpy(((uint8_t*)cdst) + sdl_hwScreen->pitch, cdst, sdl_hwScreen->pitch);
+                        cdst += sdl_hwScreen->pitch >> 1;
+                        // memcpy(((uint8_t*)zdst) + zbuf->pitch, zdst, zbuf->pitch);
+                        // zdst += zbuf->pitch;
+                    }
+                    csrc += sdl_tmpscreen->pitch >> 1;
                     cdst += sdl_hwScreen->pitch >> 1;
-                    // memcpy(((uint8_t*)zdst) + zbuf->pitch, zdst, zbuf->pitch);
-                    // zdst += zbuf->pitch;
+                    sel += selection_map->pitch;
+                    zsrc += depth_image->pitch;
+                    zdst += zbuf->pitch;
                 }
-                csrc += sdl_tmpscreen->pitch >> 1;
-                cdst += sdl_hwScreen->pitch >> 1;
-                sel += selection_map->pitch;
-                zsrc += depth_image->pitch;
-                zdst += zbuf->pitch;
             }
         }
         compose_actors(offset_x, offset_y, scale, gpu, viewport_scale);
@@ -852,7 +904,7 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         if (sel_y < 0)
             sel_y = 0;
         update_depth_editor();
-        if (mode == SHADOWBOX_MODE_BASIC || mode == SHADOWBOX_MODE_GPU)
+        if (mode == SHADOWBOX_MODE_BASIC || mode == SHADOWBOX_MODE_CPU_SHADER || mode == SHADOWBOX_MODE_GPU)
             compose_viewmaster(1, gpu, viewport_scale, screen_texture, viewport);
         else if (mode == SHADOWBOX_MODE_VIEWMASTER)
             compose_viewmaster(2, gpu, viewport_scale, screen_texture, viewport);
@@ -894,10 +946,10 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
 //            _sdlmgr->shadowbox_set_hw_screen(640, 400);
             _sdlmgr->notifyVideoExpose();
         }
-        if (mode == SHADOWBOX_MODE_VIEWMASTER || mode == SHADOWBOX_MODE_BASIC)
-        {
-//            _sdlmgr->shadowbox_set_hw_screen(1280, 400);
-        }
+//         if (mode == SHADOWBOX_MODE_VIEWMASTER || mode == SHADOWBOX_MODE_BASIC)
+//         {
+// //            _sdlmgr->shadowbox_set_hw_screen(1280, 400);
+//         }
     }
 
     void next_mode()
