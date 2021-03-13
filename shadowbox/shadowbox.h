@@ -639,23 +639,89 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
         }
     }
 
-    uint32_t backdrop_cpu_shader(float dest_x, float dest_y)
+    uint32_t backdrop_cpu_shader_2x(int dest_x, int dest_y)
     {
         // do the same bd compose, but thinking like a shader...
         // return bit-packed 08,depth8,color16
 //        return 0x0001f00f;
-        float near_parallax = parallax_table[0];
-        float far_parallax = parallax_table[255];
+        int32_t near_parallax = parallax_table[0];
+        int32_t far_parallax = parallax_table[255];
         uint16_t* csrc = (uint16_t*)sdl_tmpscreen->pixels;
         uint8_t*  zsrc = (uint8_t*)depth_image->pixels;
-        int c_src_x = (int)(dest_x * 320);
-        int c_src_y = (int)(dest_y * 200 + 0.5);
+        int c_src_x = dest_x / 2;
+        int c_src_y = dest_y / 2;
         csrc += 1 + (c_src_y + 1) * (sdl_tmpscreen->pitch >> 1);  // this addreses an off-by-1
         zsrc += main_virt_screen->xstart;
         zsrc += c_src_y * depth_image->pitch;
-        uint16_t c = csrc[c_src_x];
-        uint8_t z = zsrc[c_src_x];
-//c |= 0xf000;
+
+        uint8_t cover_z = 0;
+        uint16_t cover_c = 0;
+        bool covered = false;
+        int cover_best = 1000;
+
+        uint8_t zmax = 0;
+        uint16_t cmax = 0;
+        if (near_parallax == far_parallax)
+        {
+            cmax = csrc[c_src_x];
+            zmax = zsrc[c_src_x];
+            if (dest_y < 4)
+                cmax |= 0xf000;
+            covered = true;
+        }
+        else if (near_parallax > far_parallax)
+        {
+//            printf("A near = %d far = %d\n", (int)near_parallax, (int)far_parallax);
+            cmax = csrc[c_src_x];
+            zmax = zsrc[c_src_x];
+            cmax |= 0x000f;
+            covered = true;
+        }
+        else if (near_parallax < far_parallax)
+        {
+//            printf("B near = %d far = %d\n", (int)near_parallax, (int)far_parallax);
+            int32_t px1 = c_src_x - 1 + near_parallax / 2;
+            int32_t px2 = c_src_x + 2 + far_parallax / 2;
+            if (px1 < 0)
+                px1 = 0;
+            if (px2 > 320)
+                px2 = 320;
+//            int32_t px = 0;
+//            while (px < 320)
+            for (int px = px1; px < px2; ++px)
+            {
+                uint8_t pz = zsrc[px];
+                int32_t parallax = parallax_table[pz];
+                if ((dest_x - parallax) / 2 == px)
+                {
+                    if (pz >= zmax)
+                    {
+                        cmax = csrc[px];
+                        zmax = pz;
+                    }
+                    covered = true;
+                }
+                else
+                {
+                    int cover = 2 * px + parallax - dest_x;
+                    // if (cover < 0)
+                    //     cover = -cover;
+                    if (cover < cover_best)
+                    {
+                        cover_best = cover;
+                        cover_c = csrc[px];
+                        cover_z = pz;
+                    }
+                }
+            }
+        }
+        if (!covered)
+        {
+            zmax = cover_z;
+            cmax = cover_c;
+        }
+        uint16_t c = cmax;
+        uint8_t z = zmax;
         return (((uint32_t)z) << 16) | c;
     }
 
@@ -680,13 +746,13 @@ printf("]] at %s:%d foil->sdl8 is %dx%d %d bits/pixel\n", __FILE__, __LINE__, w,
                 cdst += offset_x + offset_y * (sdl_hwScreen->pitch >> 1);
                 for (int32_t row = 0; row < h; ++row)
                 {
-                    float y = (float)row / (float)h;
+                    int32_t y = row * scale;
                     for (int32_t col = 0; col < scale*w; ++col)
                     {
-                        float x = (float)col / (float)(scale*w);
-                        uint32_t r = backdrop_cpu_shader(x, y);
-                        uint16_t c = r & 0x0000ffff;
-                        uint8_t z = (r >> 16) & 0x00ff;
+                        int32_t x = col;
+                        uint32_t res = backdrop_cpu_shader_2x(x, y);
+                        uint16_t c = res & 0x0000ffff;
+                        uint8_t z = (res >> 16) & 0x00ff;
                         cdst[col] = c;
                         zdst[col] = z;
                     }
